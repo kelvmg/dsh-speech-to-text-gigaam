@@ -1,0 +1,53 @@
+{
+  "name": "dsh-speech-to-text-gigaam",
+  "version": "0.2.0",
+  "description": "Local GigaAM (Sber) Russian speech recognition provider for DeepSeek Harness voice input",
+  "type": "module",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml",
+    "python/gigaam_stt.py",
+    "python/setup.sh",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node test/smoke.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "speech-to-text",
+    "asr",
+    "gigaam",
+    "russian",
+    "voice-input"
+  ],
+  "author": "Evgeny Klimov",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kelvmg/dsh-speech-to-text-gigaam.git"
+  },
+  "homepage": "https://github.com/kelvmg/dsh-speech-to-text-gigaam#readme",
+  "bugs": {
+    "url": "https://github.com/kelvmg/dsh-speech-to-text-gigaam/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GigaAM voice recognition",
+    "description": "Recognizes Russian speech locally with Sber's GigaAM model on the Host CPU."
+  }
+}

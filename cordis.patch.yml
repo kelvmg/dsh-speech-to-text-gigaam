@@ -1,0 +1,19 @@
+# GigaAM (Sber) speech recognition for DSH voice input.
+#
+# Paths are resolved by the plugin: the Python environment lives in
+# ~/.dsh/speech-to-text/gigaam by default (see python/setup.sh). Override
+# `dataRoot`, `pythonPath`, `scriptPath` or `downloadRoot` below when the
+# environment lives elsewhere.
+- insert:
+    - id: speech-to-text-gigaam
+      name: dsh-speech-to-text-gigaam
+      config:
+        model: v3_e2e_rnnt
+        device: cpu
+        maxChunkSeconds: 20
+        timeoutMs: 900000
+# Select the new recognizer once; preferences saved in Settings override this
+# layer, so switching back to SenseVoice does not require disabling the bundle.
+- id: speech-to-text
+  config:
+    defaultProvider: gigaam-local
