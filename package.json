@@ -1,6 +1,6 @@
 {
   "name": "dsh-speech-to-text-gigaam",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local GigaAM (Sber) Russian speech recognition provider for DeepSeek Harness voice input",
   "type": "module",
   "exports": {
@@ -10,7 +10,7 @@
     "./icon": "./icon.svg"
   },
   "files": [
-    "lib/index.js",
+    "lib",
     "cordis.patch.yml",
     "python/gigaam_stt.py",
     "python/setup.sh",
@@ -20,7 +20,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node test/smoke.mjs"
+    "test": "node test/smoke.mjs && node test/preparation.mjs"
   },
   "dsh": {
     "bundle": {
