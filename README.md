@@ -46,8 +46,9 @@ so the microphone button in the composer transcribes Russian with GigaAM v3
    Override the location with `GIGAAM_DATA_ROOT=/path ./python/setup.sh`, and the
    model with `./python/setup.sh v3_e2e_ctc`.
 
-2. **Install the bundle.** In the Harness UI: **Plugins → Add plugin**, paste this
-   directory's absolute path (or the published package name), **Install**, then
+2. **Install the bundle.** In the Harness UI: **Plugins → Add plugin**, paste the
+   repository URL (`https://github.com/kelvmg/dsh-speech-to-text-gigaam`), this
+   directory's absolute path, or the published package name — then **Install** and
    **Enable now**.
 
 3. **Pick the recognizer.** Open the voice-input bundle details (or
