@@ -109,7 +109,7 @@ test("inspect reports failed when the interpreter is missing", async () => {
     await preparation.inspect();
     const state = preparation.snapshot();
     assert.equal(state.phase, "failed");
-    assert.match(state.message, /setup\.sh/);
+    assert.match(state.message, /Download and prepare/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

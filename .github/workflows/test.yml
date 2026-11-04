@@ -1,0 +1,23 @@
+name: Regression tests
+on:
+  push:
+  pull_request:
+jobs:
+  regressions:
+    strategy:
+      matrix:
+        node: [20, 22]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: python -m pip install numpy==2.2.6
+      - run: python -B -m unittest discover -s test -p python_worker.py -v

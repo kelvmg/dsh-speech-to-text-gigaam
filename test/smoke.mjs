@@ -128,7 +128,7 @@ test("reports a missing interpreter clearly", async () => {
   const provider = harness({ pythonPath: "/nonexistent/python-for-tests" });
   await assert.rejects(
     provider.transcribe({ audio: emptyWav(), language: "ru" }, new AbortController().signal),
-    /failed to start/,
+    /Download and prepare/,
   );
 });
 

@@ -26,28 +26,31 @@ import numpy as np
 
 
 def _extend_tool_path() -> None:
-    """Make Homebrew/local binaries visible when launched from a GUI app.
+    """Prefer the managed environment's ffmpeg, then local/system tools.
 
-    DSH runs as a macOS app whose PATH is typically just /usr/bin:/bin:/usr/sbin:/sbin,
-    so `ffmpeg` (required by GigaAM's audio loader) is not found even though it is
-    installed. Prepend the usual package-manager prefixes before touching gigaam.
+    Bootstrap places ffmpeg next to the venv Python executable. Do not resolve
+    symlinks here: resolving Python may point outside that managed environment.
     """
-    path = os.environ.get("PATH", "")
-    parts = [part for part in path.split(os.pathsep) if part]
-    for directory in ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"):
-        if os.path.isdir(directory) and directory not in parts:
-            parts.insert(0, directory)
-    os.environ["PATH"] = os.pathsep.join(parts)
+    directories = [os.path.dirname(os.path.abspath(sys.executable))]
+    directories.extend(
+        directory for directory in ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin")
+        if os.path.isdir(directory)
+    )
+    directories.extend(os.environ.get("PATH", "").split(os.pathsep))
+    os.environ["PATH"] = os.pathsep.join(dict.fromkeys(part for part in directories if part))
 
 
 _extend_tool_path()
 
-if shutil.which("ffmpeg") is None:
-    sys.stderr.write(
-        "ffmpeg is required by GigaAM but was not found. Install it (brew install ffmpeg) "
-        "or add its directory to PATH.\n"
-    )
-    raise SystemExit(3)
+
+def _require_ffmpeg() -> None:
+    """Check only when audio decoding is needed, not during import or warmup."""
+    if shutil.which("ffmpeg") is None:
+        raise SystemExit(
+            "ffmpeg was not found in the GigaAM environment. "
+            "Open the plugin settings in DSH and run Prepare environment."
+        )
+
 
 SR = 16000
 HARD_LIMIT_SEC = 25.0
@@ -84,29 +87,28 @@ def _frame_rms(audio: np.ndarray, frame: int = 320) -> np.ndarray:
 
 def _cut_points(audio: np.ndarray, max_chunk: float) -> list[int]:
     """Return sample offsets that split *audio* into pieces of <= max_chunk seconds."""
+    if not np.isfinite(max_chunk) or max_chunk <= 0:
+        raise ValueError("max_chunk must be finite and positive")
+    max_samples = max(1, int(min(max_chunk, HARD_LIMIT_SEC) * SR))
     total = len(audio)
     frame = 320  # 20 ms
     rms = _frame_rms(audio, frame)
-    search_frames = int(3.0 * SR / frame)  # +-3 s around the boundary
-    target_frames = int(max_chunk * SR / frame)
-
     cuts: list[int] = []
-    pos_frames = target_frames
-    while pos_frames < len(rms) - int(2.0 * SR / frame):
-        lo = max(1, pos_frames - search_frames)
-        hi = min(len(rms) - 1, pos_frames + search_frames)
-        cut = lo + int(np.argmin(rms[lo:hi]))
-        cuts.append(cut * frame)
-        pos_frames = cut + target_frames
-
-    out = []
     previous = 0
-    for cut in cuts:
-        if (cut - previous) < 2.0 * SR:  # merge too-short chunks into the previous one
-            continue
-        out.append(cut)
+    while total - previous > max_samples:
+        # Search only BEFORE the hard boundary, and strictly after the previous
+        # cut. Searching on both sides can exceed the model limit or repeatedly
+        # choose the same silent frame when max_chunk is as small as 3 seconds.
+        boundary = previous + max_samples
+        earliest = max(previous + min(2 * SR, max_samples), boundary - 3 * SR)
+        lo = (earliest + frame - 1) // frame
+        hi = min(boundary // frame, len(rms) - 1)
+        cut = boundary
+        if lo <= hi:
+            cut = (lo + int(np.argmin(rms[lo:hi + 1]))) * frame
+        cuts.append(cut)
         previous = cut
-    return out
+    return cuts
 
 
 def _load_gigaam():
@@ -114,8 +116,8 @@ def _load_gigaam():
         import gigaam
     except ImportError as exc:  # pragma: no cover - depends on the environment
         raise SystemExit(
-            "gigaam is not installed for this interpreter; run dsh-gigaam/python/setup.sh "
-            "or install it with `pip install torch torchaudio gigaam`"
+            "gigaam is not installed for this interpreter. "
+            "Open the plugin settings in DSH and run Prepare environment."
         ) from exc
     return gigaam
 
@@ -125,8 +127,10 @@ def _transcribe_chunks(model, wav_path: str, max_chunk: float) -> str:
     import soundfile as sf
 
     audio = gigaam.load_audio(wav_path).numpy()
+    if not len(audio):
+        return ""
     duration = len(audio) / SR
-    if duration <= min(HARD_LIMIT_SEC, max_chunk) - 0.5:
+    if duration <= min(HARD_LIMIT_SEC, max_chunk):
         return model.transcribe(wav_path).text
 
     cuts = _cut_points(audio, max_chunk)
@@ -134,8 +138,6 @@ def _transcribe_chunks(model, wav_path: str, max_chunk: float) -> str:
     parts: list[str] = []
     with tempfile.TemporaryDirectory(prefix="gigaam-chunks-") as tmp:
         for index, (start, end) in enumerate(zip(boundaries, boundaries[1:])):
-            if end - start < SR // 2:
-                continue
             chunk_path = os.path.join(tmp, f"chunk_{index:03d}.wav")
             sf.write(chunk_path, audio[start:end], SR, subtype="PCM_16")
             parts.append(model.transcribe(chunk_path).text.strip())
@@ -186,6 +188,9 @@ def main() -> int:
             open(args.output, "w", encoding="utf-8").close()
         return 0
 
+    if not args.warmup:
+        _require_ffmpeg()
+
     started = time.time()
     _log(f"start model={args.model} device={args.device} input={args.input or '-'} warmup={args.warmup}")
     gigaam = _load_gigaam()
@@ -222,7 +227,7 @@ if __name__ == "__main__":
         import traceback
 
         try:
-            with open("/tmp/dsh-gigaam-stt.log", "a", encoding="utf-8") as handle:
+            with open(LOG_PATH, "a", encoding="utf-8") as handle:
                 handle.write(
                     f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} argv={sys.argv[1:]}\n"
                     f"PATH={os.environ.get('PATH', '')}\n"

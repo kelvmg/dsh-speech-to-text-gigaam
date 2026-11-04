@@ -1,171 +1,140 @@
 # dsh-speech-to-text-gigaam
 
-Local **Russian speech recognition for DeepSeek Harness voice input**, powered by
-[Sber's GigaAM v3 E2E RNNT](https://github.com/salute-developers/GigaAM) and running
-entirely on the Host CPU. Punctuation and capitalisation are part of the output.
+Local **Russian speech recognition for DeepSeek Harness**, powered by
+[Sber GigaAM v3 E2E RNNT](https://github.com/salute-developers/GigaAM).
+Punctuation and capitalisation are included. Audio and transcripts stay on the host.
 
-DSH ships a single recognizer — `sensevoice-local` (SenseVoiceSmall) — whose language
-hints are `auto`, `zh`, `en`, `yue`, `ja`, `ko`: **no Russian**. This bundle registers
-an additional `speechToText` provider, `gigaam-local`, and selects it as the default.
+## Install and prepare — no terminal required
 
-> Audio never leaves the machine. The only network access is the one-time download of
-> the model weights from Sber's public CDN.
+1. In DSH, open **Plugins → Add plugin** and install
+   `https://github.com/kelvmg/dsh-speech-to-text-gigaam`. Enable the bundle.
+2. Open voice settings, select **GigaAM v3 · Russian (punctuation)** and `ru` or `auto`.
+3. Click **Download and prepare**. The plugin installs its own Python, PyTorch,
+   GigaAM, audio tools and recognition model. Progress, cancellation and retry are
+   available in the existing voice preparation card.
+4. Start dictation once preparation finishes.
 
-## Features
+**Automatic setup in 0.4.0 supports macOS on Apple Silicon (arm64, macOS 13+).**
+No system Python, Homebrew, git or separately installed ffmpeg is required.
+Other platforms fail with an explicit explanation before downloading anything;
+advanced users can provide a prepared interpreter with `pythonPath`.
+Intel Mac is not supported by automatic setup: its last official PyTorch build
+conflicts with the current GigaAM NumPy requirements.
 
-- **Russian with punctuation.** GigaAM v3 E2E RNNT returns punctuated, capitalised
-  text — no post-processing heuristics.
-- **Guided download in the UI.** The provider never downloads on activation: the voice
-  settings show an explicit “Download and prepare” card with disk, memory and time
-  estimates, a progress bar, cancellation and checksum verification.
-- **One model, no choices.** `v3_e2e_rnnt` is the only checkpoint the provider
-  installs. Other GigaAM models can be pre-downloaded with `setup.sh` and selected in
-  the row config, but the UI will not offer them.
-- **Fully local.** No API keys, no cloud transcription; inference runs in a Python
-  worker on the Host.
-- **Long recordings.** GigaAM accepts at most 25 s per call; the worker cuts longer
-  audio at low-energy points and joins the chunk transcripts.
-- **Cancellable and serialized.** Cancel discards the recording and kills the worker;
-  parallel recordings queue instead of loading several models at once.
-- **Portable defaults.** Paths resolve to `~/.dsh/speech-to-text/gigaam`; no absolute
-  paths are baked into the bundle.
+Requires DSH with `@deepseek-ai/dsh-experimental-voice-input-bundle` and Node 20.3+
+(the DSH host supplies Node). Reserve **4 GB disk**, approximately **2 GB RAM**;
+initial setup normally takes **3–20 minutes**, depending on the network and machine.
 
-## Requirements
+## What preparation does
 
-- DeepSeek Harness with the voice-input bundle (`@deepseek-ai/dsh-experimental-voice-input-bundle`).
-- `ffmpeg` on `PATH` (`brew install ffmpeg`).
-- Python 3.10+ with `torch`, `torchaudio` and `gigaam` — `python/setup.sh` builds it.
-- About 430 MB for the model and 2.5 GB for the Python environment.
+Activation only checks local resources: **no background downloads or installers**.
+The existing `check → model → verify → load` preparation contract is retained.
 
-## Install
+- **Check:** download SHA-256-verified uv 0.9.7, install private CPython 3.11.14,
+  create a private environment and install the checked-in dependency lockfile with
+  `--require-hashes`. PyTorch and torchaudio are both 2.8.0. GigaAM source is pinned
+  to commit `7447938d791c4f3e643386ee22c33777004293a5` and SHA-256 verified.
+  ffmpeg comes from `imageio-ffmpeg==0.6.0`, not a system package manager.
+- **Model:** download `v3_e2e_rnnt.ckpt` (448,929,252 bytes) and tokenizer
+  (255,336 bytes) from Sber's CDN. This is the only guided model.
+- **Verify:** verify sizes, the checkpoint's upstream MD5 and tokenizer SHA-256.
+- **Load:** warm up the model using the configured device. Inference and warmup
+  share a single process queue.
 
-1. **Prepare the Python environment** (once). It creates a venv in
-   `~/.dsh/speech-to-text/gigaam`, installs PyTorch and GigaAM, then downloads and
-   warms up the model:
+Files persist under `~/.dsh/speech-to-text/gigaam`:
 
-   ```bash
-   ./python/setup.sh
-   ```
+```text
+runtime/       private installer, Python, venv, package cache and readiness marker
+models/        recognition checkpoint and tokenizer
+```
 
-   Override the location with `GIGAAM_DATA_ROOT=/path ./python/setup.sh`. The model is
-   optional here: if the script is run without network access, the UI can download it
-   later.
+An interrupted installation never creates a readiness marker. Retry reuses valid
+archives, downloaded Python and package cache. Completed models are reused too;
+a partially downloaded model starts over (HTTP Range resume is not implemented).
+Preparation has a heartbeat lock to prevent overlapping sessions. After a host
+crash, a stale lock expires within two minutes; retry then.
 
-2. **Install the bundle.** In the Harness UI: **Plugins → Add plugin**, paste the
-   repository URL (`https://github.com/kelvmg/dsh-speech-to-text-gigaam`), this
-   directory's absolute path, or the published package name — then **Install** and
-   **Enable now**.
+**Upgrade from 0.3:** existing `models/` are reused; the old manually created
+`venv/` is left untouched. The default moves to `runtime/venv/`, so click
+**Download and prepare** once after updating. To retain a manually prepared
+interpreter instead, explicitly set its absolute `pythonPath`.
 
-3. **Pick the recognizer.** Open the voice-input bundle details (or
-   **Settings → voice input**), choose **GigaAM v3 · Russian (punctuation)** and
-   language `auto` or `ru`.
+## Network, privacy and integrity
 
-## Guided model download
+Setup contacts GitHub (uv, pinned standalone Python and GigaAM source),
+`pypi.org`/`files.pythonhosted.org` (Python distributions) and
+`cdn.chatwm.opensmodel.sberdevices.ru` (recognition model). The source selector in
+voice settings applies **only to model files**, not runtime dependencies.
 
-On activation the provider only inspects the cache. With no model on disk it reports
-`unprepared`, and the voice settings show a card with:
+Runtime archives, source and locked Python distributions are verified against
+pinned hashes. uv verifies standalone Python using its pinned download catalog.
+Python build tooling still uses isolated build environments and the HTTPS PyPI
+index; this is not a completely hermetic/offline build. Setup does not alter
+system Python, shell profiles or global PATH. Ambient pip/uv configuration and
+`IMAGEIO_FFMPEG_EXE` do not override managed setup; normal certificate/proxy
+settings remain usable.
 
-| Estimate | Value |
-| --- | --- |
-| Disk | ~0.5 GB |
-| Memory | ~1.5 GB |
-| Time | 1–5 minutes |
-
-“Download and prepare” then runs four steps:
-
-1. **Check local resources** — the Python interpreter and the worker script exist.
-2. **Prepare recognition model** — downloads `v3_e2e_rnnt.ckpt` (428 MB) and
-   `v3_e2e_rnnt_tokenizer.model` (0.25 MB) from
-   `https://cdn.chatwm.opensmodel.sberdevices.ru` into `downloadRoot`.
-3. **Verify model files** — size, MD5 of the checkpoint
-   (`2730de7545ac43ad256485a462b0a27a`) and SHA-256 of the tokenizer.
-4. **Load GigaAM v3 · Russian (punctuation)** — a warm-up run, so the first dictation
-   takes seconds instead of half a minute.
-
-The download can be cancelled at any point; a partial file is removed and the next
-attempt starts over. On success the provider reports `standby`/`ready` and the
-microphone records normally.
-
-If the interpreter is missing, the card reports a failure with the instruction to run
-`python/setup.sh` — nothing is downloaded or recorded in that state.
+Downloads have deadlines and exact byte caps; corrupt or partial files are not
+published as final assets. Cancel kills the process group and waits for process
+exit before deleting temporary audio or starting another job. Recordings are
+transcribed locally and temporary WAV/transcript files are removed afterwards.
+Errors write diagnostic traces to `dsh-gigaam-stt.log` in the system temp directory.
+No audio, transcript or telemetry is uploaded.
 
 ## Configuration
 
-The bundle patch declares the row `speech-to-text-gigaam`:
+Defaults are in `cordis.patch.yml`; advanced options on `speech-to-text-gigaam`:
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `dataRoot` | `~/.dsh/speech-to-text/gigaam` | Base directory for `venv/` and `models/` |
-| `pythonPath` | `<dataRoot>/venv/bin/python` | Interpreter with `gigaam` installed |
-| `scriptPath` | `<package>/python/gigaam_stt.py` | Worker script |
-| `downloadRoot` | `<dataRoot>/models` | Model cache |
-| `model` | `v3_e2e_rnnt` | Only this model is offered for guided download |
-| `device` | `cpu` | `cpu`, `mps` or `cuda`; CPU is faster than MPS on Apple silicon |
-| `maxChunkSeconds` | `20` | Chunk length for recordings over 25 s (clamped to 3–24.5) |
-| `timeoutMs` | `900000` | Worker deadline, including the first model download |
-| `providerId` | `gigaam-local` | Registered provider id |
-| `providerName` | `GigaAM v3 · Russian (punctuation)` | Label in the provider list |
-| `downloadSources` | CDN Sber | Origins offered for the download |
-| `loadModel` | `true` | Skip the warm-up step (tests) |
-
-## How it works
-
-```
-composer mic → speechToText service → gigaam-local provider (lib/index.js)
-             → preparation (lib/preparation.js) for the model files
-             → Python worker (python/gigaam_stt.py) → GigaAM on CPU → text
-```
-
-The worker is spawned per recording, so the provider is stateless; the model loads in
-about 2 s and inference is roughly 0.04× real time on an M3.
-
-## Performance (Apple M3, 8 cores, CPU)
-
-| Recording | Wall time |
+| Option | Default / purpose |
 | --- | --- |
-| 10.7 s | ~3 s |
-| 39.5 s (2 chunks) | ~3 s |
-| Warm-up (verify + load) | ~3 s |
+| `dataRoot` | `~/.dsh/speech-to-text/gigaam` |
+| `pythonPath` | `dataRoot/runtime/venv/bin/python`; an explicit path disables managed installs |
+| `downloadRoot` | `dataRoot/models` |
+| `model` | `v3_e2e_rnnt`; other models require an externally prepared environment and cache |
+| `device` | `cpu`; `auto` may choose MPS; only CPU is smoke-tested |
+| `maxChunkSeconds` | `20`; clamped to `3…24.5`; every sample is retained |
+| `timeoutMs` | `900000` per recognition/warmup job |
+| `setupTimeoutMs` | `1800000` per installer command/download |
+| `downloadTimeoutMs` | `900000` per model download |
+| `downloadSources` | Sber CDN origin; additional trusted model mirrors are optional |
+| `loadModel` | `true`; disable only for diagnostics/tests |
 
-## Limitations
+Unsupported guided models fail before any installation. An explicit custom
+`pythonPath` must already contain all dependencies and ffmpeg; the plugin never
+installs packages into a user-specified interpreter.
 
-- **One model.** Only `v3_e2e_rnnt` is downloadable from the UI. Other GigaAM models
-  (multilingual, CTC, SSL) must be fetched manually and referenced in the config.
-- **No streaming.** The DSH speech service transcribes complete recordings only, so
-  text appears after **Stop**.
-- **Python environment is scripted.** `prepare()` downloads weights, but the 2.5 GB
-  Python environment still comes from `python/setup.sh`.
-- **CPU memory.** Expect roughly 1.5 GB RSS while a transcription runs.
+## Development and headless preparation
 
-## Troubleshooting
+```sh
+npm ci
+npm test                         # model-free Node regressions
+# Optional terminal equivalent of the explicit UI prepare button:
+npm run setup:runtime
+npm run test:smoke               # real model: 7 recognition/integration tests
+# Python-only regressions, using the prepared runtime:
+~/.dsh/speech-to-text/gigaam/runtime/venv/bin/python -B -m unittest discover -s test -p python_worker.py -v
+```
 
-- `ffmpeg is required but was not found` — install ffmpeg; the worker prepends
-  `/opt/homebrew/bin`, `/usr/local/bin` and `/opt/local/bin` to `PATH` already.
-- `Python environment not found … Run python/setup.sh first` — the venv is missing or
-  `pythonPath` points elsewhere.
-- `Downloaded … failed its checksum; try again` — a proxy or mirror returned corrupted
-  bytes; the partial file is removed, retry the download.
-- The worker writes diagnostic lines and full tracebacks to
-  `<tmpdir>/dsh-gigaam-stt.log`, because the desktop app has no stderr console.
-
-## Privacy
-
-Recordings are written to a temporary directory, transcribed locally and deleted
-immediately. No audio, transcript or telemetry is sent anywhere. Setup downloads
-PyTorch wheels from your pip index and GigaAM weights from
-`cdn.chatwm.opensmodel.sberdevices.ru`.
-
-## License
-
-MIT © 2026 Evgeny Klimov. GigaAM itself is MIT-licensed by SberDevices; see
-[salute-developers/GigaAM](https://github.com/salute-developers/GigaAM).
+`GIGAAM_DATA_ROOT=/absolute/test-directory` selects an independent data root for
+headless preparation and smoke tests. `python/setup.sh` is a compatibility wrapper
+for the same Node-based preparation; it no longer calls system Python or git.
+The dependency lockfile can be regenerated using pinned uv with
+`uv pip compile --generate-hashes --no-header --no-annotate` from
+`python/requirements-macos-arm64.in`; update the lock digest in the manifest too.
 
 ## Changelog
 
-- **0.3.0** — guided model download with progress, cancellation and checksum
-  verification; explicit setup card; single-model scope (`v3_e2e_rnnt`); preparation
-  unit tests.
-- **0.2.0** — returns the `{ text, audioSeconds, inferenceSeconds }` result shape the
-  voice API requires; portable defaults instead of absolute paths; `PATH` fix for
-  GUI-launched apps; chunk-length clamping; smoke tests; package metadata.
-- **0.1.0** — first working provider.
+- **0.4.0** — one-click isolated Python/dependency/audio-tool setup on Apple Silicon;
+  pinned runtime/source and hashed dependency lock; cache reuse, cancel/retry and
+  honest resource estimates. Fix infinite/oversized chunking and lost short tails,
+  queued cancellation, child-reaping/cleanup races, warmup serialization and device
+  propagation. Add bounded downloads and bootstrap/process/audio regressions.
+- **0.3.0** — guided single-model download, progress, cancellation and checksums.
+- **0.2.0** — voice API result shape, portable paths and smoke tests.
+- **0.1.0** — initial provider.
+
+## License
+
+MIT © 2026 Evgeny Klimov. GigaAM is MIT-licensed by SberDevices. uv, PyTorch and
+ffmpeg retain their own upstream licenses. Runtime binaries are downloaded on
+request, not embedded in the plugin package.
